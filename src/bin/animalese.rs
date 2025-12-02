@@ -37,6 +37,10 @@ struct Args {
     #[arg(short = 'V', long, default_value = "0.65")]
     volume: f32,
 
+    /// Intonation: pitch glide over sentence (-1.0 falling to 1.0 rising)
+    #[arg(short = 'i', long, default_value = "0.0")]
+    intonation: f32,
+
     /// Path to audio assets directory (defaults to bundled assets)
     #[arg(short, long)]
     assets: Option<String>,
@@ -75,8 +79,8 @@ fn interactive_mode(engine: &Animalese, args: &Args) -> Result<(), Box<dyn std::
         .map(|s| s.as_str())
         .unwrap_or("bundled");
     println!("🎮 Animalese Interactive Mode");
-    println!("   Voice: {}, Pitch: {}, Variation: {}, Assets: {}",
-             args.voice, args.pitch, args.variation, assets_info);
+    println!("   Voice: {}, Pitch: {}, Variation: {}, Intonation: {}, Assets: {}",
+             args.voice, args.pitch, args.variation, args.intonation, assets_info);
     println!("   Type to hear sounds. Press Esc or Ctrl-C to exit.\n");
 
     enable_raw_mode()?;
@@ -176,6 +180,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         pitch_shift: args.pitch,
         pitch_variation: args.variation,
         volume: args.volume,
+        intonation: args.intonation,
     };
 
     // Initialize engine with bundled assets or custom path
@@ -191,8 +196,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Handle test flag
     if args.test {
-        println!("🎮 Testing voice: {} (pitch: {}, variation: {}, volume: {})",
-                 args.voice, args.pitch, args.variation, args.volume);
+        println!("🎮 Testing voice: {} (pitch: {}, variation: {}, volume: {}, intonation: {})",
+                 args.voice, args.pitch, args.variation, args.volume, args.intonation);
         println!("Speaking: 'hello world'");
         play_text(&engine, "hello world")?;
         return Ok(());

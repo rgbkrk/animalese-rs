@@ -1,7 +1,31 @@
 //! Animalese sound generator
 //!
 //! Recreates the Animal Crossing "animalese" speech effect by playing phonetic
-//! sound sprites with pitch variation.
+//! sound sprites with pitch variation and intonation.
+//!
+//! ## Features
+//!
+//! - **8 voice types**: Female (f1-f4) and male (m1-m4) voices
+//! - **Pitch control**: Shift pitch and add random variation for natural sound
+//! - **Intonation**: Apply pitch glides for questions, statements, and excitement
+//! - **Sound effects**: Built-in SFX for keyboard interactions
+//! - **Bundled assets**: Audio files included in the crate
+//!
+//! ## Quick Start
+//!
+//! ```no_run
+//! use animalese::Animalese;
+//!
+//! let engine = Animalese::new()?;
+//! engine.speak("hello world")?;
+//!
+//! // Questions with rising intonation
+//! engine.speak_question("What's that?")?;
+//!
+//! // Excited speech
+//! engine.speak_excited("Amazing!")?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 use rodio::{Decoder, OutputStream, Sink, Source};
 use std::fs::File;
@@ -53,6 +77,7 @@ pub struct VoiceProfile {
     pub pitch_shift: f32,      // Fixed pitch shift in semitones
     pub pitch_variation: f32,  // Random variation range in semitones
     pub volume: f32,           // Volume multiplier (0.0 to 1.0)
+    pub intonation: f32,       // Pitch glide over sentence: -1.0 (falling) to 1.0 (rising)
 }
 
 impl Default for VoiceProfile {
@@ -62,6 +87,7 @@ impl Default for VoiceProfile {
             pitch_shift: 0.0,
             pitch_variation: 0.2,
             volume: 0.65,
+            intonation: 0.0,
         }
     }
 }
@@ -130,7 +156,7 @@ fn semitones_to_rate(semitones: f32) -> f32 {
 
 /// Sound command for the playback queue
 enum SoundCommand {
-    Play { path: String, start: Duration, duration: Duration, apply_pitch: bool, max_duration: Option<Duration> },
+    Play { path: String, start: Duration, duration: Duration, apply_pitch: bool, max_duration: Option<Duration>, intonation_shift: f32 },
     Stop,
 }
 
@@ -195,7 +221,7 @@ impl Animalese {
 
             loop {
                 match command_rx.recv() {
-                    Ok(SoundCommand::Play { path, start, duration, apply_pitch, max_duration }) => {
+                    Ok(SoundCommand::Play { path, start, duration, apply_pitch, max_duration, intonation_shift }) => {
                         if let Ok(file) = File::open(&path) {
                             if let Ok(source) = Decoder::new(BufReader::new(file)) {
                                 // Use shorter duration if specified (for fast typing)
@@ -208,7 +234,7 @@ impl Animalese {
                                     let profile = profile_clone.lock().unwrap();
                                     let mut rng = rand::thread_rng();
                                     let random_variation = rng.gen_range(-1.0..=1.0) * profile.pitch_variation;
-                                    let final_pitch = profile.pitch_shift + random_variation;
+                                    let final_pitch = profile.pitch_shift + random_variation + intonation_shift;
                                     let playback_rate = semitones_to_rate(final_pitch);
                                     let volume = profile.volume;
                                     drop(profile);
@@ -262,10 +288,15 @@ impl Animalese {
 
     /// Play a letter sound with optional max duration (for fast typing)
     pub fn play_letter_with_duration(&self, c: char, max_duration: Option<Duration>) -> Result<(), Box<dyn std::error::Error>> {
+        self.play_letter_with_options(c, max_duration, 0.0)
+    }
+
+    /// Play a letter sound with optional duration and intonation adjustment
+    fn play_letter_with_options(&self, c: char, max_duration: Option<Duration>, intonation_shift: f32) -> Result<(), Box<dyn std::error::Error>> {
         let sprite_time = letter_to_sprite_time(c)
             .ok_or("Not a valid letter")?;
 
-        self.play_sprite(&self.voice_path, sprite_time, Duration::from_millis(200), true, max_duration)
+        self.play_sprite(&self.voice_path, sprite_time, Duration::from_millis(200), true, max_duration, intonation_shift)
     }
 
     /// Play a special sound (ok, gwah, deska)
@@ -273,7 +304,7 @@ impl Animalese {
         let sprite_time = special_to_sprite_time(name)
             .ok_or("Unknown special sound")?;
 
-        self.play_sprite(&self.voice_path, sprite_time, Duration::from_millis(600), true, None)
+        self.play_sprite(&self.voice_path, sprite_time, Duration::from_millis(600), true, None, 0.0)
     }
 
     /// Play a sound effect (enter, backspace, etc)
@@ -281,14 +312,45 @@ impl Animalese {
         let sprite_time = sfx_to_sprite_time(name)
             .ok_or("Unknown SFX sound")?;
 
-        self.play_sprite(&self.sfx_path, sprite_time, Duration::from_millis(600), false, None)
+        self.play_sprite(&self.sfx_path, sprite_time, Duration::from_millis(600), false, None, 0.0)
     }
 
-    /// Play text as animalese speech
+    /// Play text as animalese speech with intonation
     pub fn speak(&self, text: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let profile = self.profile.lock().unwrap();
+        let base_intonation = profile.intonation;
+        drop(profile);
+
+        // Check if text ends with question mark for automatic rising intonation
+        let has_question = text.trim_end().ends_with('?');
+        let intonation = if has_question && base_intonation == 0.0 {
+            0.5 // Apply gentle rising intonation for questions
+        } else {
+            base_intonation
+        };
+
+        // Count letters for position calculation
+        let letters: Vec<char> = text.chars().filter(|c| c.is_ascii_alphabetic()).collect();
+        let total_letters = letters.len() as f32;
+
+        if total_letters == 0.0 {
+            return Ok(());
+        }
+
+        let mut letter_index = 0.0;
         for c in text.chars() {
             if c.is_ascii_alphabetic() {
-                self.play_letter(c)?;
+                // Calculate position (0.0 to 1.0) in the sentence
+                let position = letter_index / total_letters;
+
+                // Apply intonation curve
+                // Positive intonation = rising (pitch increases)
+                // Negative intonation = falling (pitch decreases)
+                let intonation_shift = intonation * position * 3.0; // Scale to ~3 semitones max
+
+                self.play_letter_with_options(c, None, intonation_shift)?;
+                letter_index += 1.0;
+
                 // Small delay between letters to simulate speech cadence
                 std::thread::sleep(Duration::from_millis(50));
             }
@@ -296,8 +358,104 @@ impl Animalese {
         Ok(())
     }
 
+    /// Speak text with rising intonation (for questions)
+    ///
+    /// Automatically applies a rising pitch contour, perfect for questions
+    /// or uncertain statements.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use animalese::Animalese;
+    ///
+    /// let engine = Animalese::new().unwrap();
+    /// engine.speak_question("What's that").unwrap();
+    /// ```
+    pub fn speak_question(&self, text: &str) -> Result<(), Box<dyn std::error::Error>> {
+        // Temporarily set intonation to rising
+        let original_intonation = {
+            let mut profile = self.profile.lock().unwrap();
+            let original = profile.intonation;
+            profile.intonation = 0.6; // Moderate rising intonation
+            original
+        };
+
+        let result = self.speak(text);
+
+        // Restore original intonation
+        if let Ok(mut profile) = self.profile.lock() {
+            profile.intonation = original_intonation;
+        }
+
+        result
+    }
+
+    /// Speak text with excitement (higher pitch, rising intonation)
+    ///
+    /// Applies higher pitch and rising intonation for excited or enthusiastic
+    /// speech. Great for exclamations!
+    ///
+    /// # Example
+    /// ```no_run
+    /// use animalese::Animalese;
+    ///
+    /// let engine = Animalese::new().unwrap();
+    /// engine.speak_excited("Amazing!").unwrap();
+    /// ```
+    pub fn speak_excited(&self, text: &str) -> Result<(), Box<dyn std::error::Error>> {
+        // Temporarily boost pitch and add rising intonation
+        let (original_pitch, original_intonation) = {
+            let mut profile = self.profile.lock().unwrap();
+            let orig_pitch = profile.pitch_shift;
+            let orig_intonation = profile.intonation;
+            profile.pitch_shift += 2.0; // Raise pitch by 2 semitones
+            profile.intonation = 0.4; // Gentle rising intonation
+            (orig_pitch, orig_intonation)
+        };
+
+        let result = self.speak(text);
+
+        // Restore original settings
+        if let Ok(mut profile) = self.profile.lock() {
+            profile.pitch_shift = original_pitch;
+            profile.intonation = original_intonation;
+        }
+
+        result
+    }
+
+    /// Speak text with falling intonation (for statements)
+    ///
+    /// Applies a gentle falling pitch contour, typical of declarative
+    /// statements and confident assertions.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use animalese::Animalese;
+    ///
+    /// let engine = Animalese::new().unwrap();
+    /// engine.speak_statement("I see").unwrap();
+    /// ```
+    pub fn speak_statement(&self, text: &str) -> Result<(), Box<dyn std::error::Error>> {
+        // Temporarily set intonation to falling
+        let original_intonation = {
+            let mut profile = self.profile.lock().unwrap();
+            let original = profile.intonation;
+            profile.intonation = -0.3; // Gentle falling intonation
+            original
+        };
+
+        let result = self.speak(text);
+
+        // Restore original intonation
+        if let Ok(mut profile) = self.profile.lock() {
+            profile.intonation = original_intonation;
+        }
+
+        result
+    }
+
     /// Internal method to queue a sprite for playback
-    fn play_sprite(&self, audio_path: &str, start: Duration, duration: Duration, apply_pitch: bool, max_duration: Option<Duration>) -> Result<(), Box<dyn std::error::Error>> {
+    fn play_sprite(&self, audio_path: &str, start: Duration, duration: Duration, apply_pitch: bool, max_duration: Option<Duration>, intonation_shift: f32) -> Result<(), Box<dyn std::error::Error>> {
         // Determine the full file path
         let file_path = if audio_path.ends_with(".ogg") {
             // It's already a full path to sfx.ogg
@@ -318,6 +476,7 @@ impl Animalese {
             duration,
             apply_pitch,
             max_duration,
+            intonation_shift,
         })?;
 
         Ok(())
@@ -365,5 +524,24 @@ mod tests {
         assert_eq!(profile.pitch_shift, 0.0);
         assert_eq!(profile.pitch_variation, 0.2);
         assert_eq!(profile.volume, 0.65);
+        assert_eq!(profile.intonation, 0.0);
+    }
+
+    #[test]
+    fn test_intonation_values() {
+        let mut profile = VoiceProfile::default();
+
+        // Test setting various intonation values
+        profile.intonation = 0.5;
+        assert_eq!(profile.intonation, 0.5);
+
+        profile.intonation = -0.5;
+        assert_eq!(profile.intonation, -0.5);
+
+        profile.intonation = 1.0;
+        assert_eq!(profile.intonation, 1.0);
+
+        profile.intonation = -1.0;
+        assert_eq!(profile.intonation, -1.0);
     }
 }
