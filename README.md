@@ -18,7 +18,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-animalese = "0.1"
+animalese = "0.2"
 ```
 
 ## Usage
