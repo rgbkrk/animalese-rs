@@ -109,6 +109,31 @@ Available options:
 - `--list` (`-l`): Show available voices
 - `--test` (`-t`): Play test phrase
 
+## Known Issues
+
+### Audio Clicking in Fast Typing Mode
+
+When typing very fast in interactive mode, you may occasionally hear clicking or popping artifacts. This is due to abruptly cutting audio waveforms when sounds overlap rapidly.
+
+**Current mitigations:**
+- 5ms fade-in applied to all sounds
+- Reduced playback duration for fast typing (30ms)
+
+**Workaround:** Type slightly slower or adjust the fast-typing threshold in the source.
+
+**Future:** We're evaluating alternative audio backends like [`kira`](https://github.com/tesselode/kira) (designed for game audio with per-sound control and tweening) or [`creek`](https://github.com/MeadowlarkDAW/creek) that provide better control over individual sound instances and fade-outs.
+
+## Technical Details
+
+### Audio Backend
+
+Currently uses [`rodio`](https://github.com/RustAudio/rodio) for audio playback. While excellent for music playback, rodio's `Sink` architecture makes it challenging to apply per-sound fade-outs dynamically, which can cause clicks when cutting sounds short during fast typing.
+
+**Potential alternatives:**
+- [`kira`](https://github.com/tesselode/kira) - Game audio library with individual sound instance control, tweening, and proper fade-outs
+- [`creek`](https://github.com/MeadowlarkDAW/creek) - Low-latency audio playback with sample-accurate control
+- [`tunes`](https://github.com/sqrew/tunes) - Comprehensive music synthesis and composition (heavier weight)
+
 ## License
 
 MIT

@@ -239,14 +239,14 @@ impl Animalese {
                                     let volume = profile.volume;
                                     drop(profile);
 
-                                    let source = source.speed(playback_rate).amplify(volume);
+                                    let source = source.speed(playback_rate).amplify(volume).fade_in(Duration::from_millis(5));
                                     sink.append(source);
                                 } else {
                                     let profile = profile_clone.lock().unwrap();
                                     let volume = profile.volume;
                                     drop(profile);
 
-                                    let source = source.amplify(volume);
+                                    let source = source.amplify(volume).fade_in(Duration::from_millis(5));
                                     sink.append(source);
                                 }
                             }

@@ -107,7 +107,7 @@ fn interactive_mode(engine: &Animalese, args: &Args) -> Result<(), Box<dyn std::
 
                                 // If typing fast (< 100ms between keys), use shorter duration
                                 let max_duration = if time_since_last < Duration::from_millis(100) {
-                                    Some(Duration::from_millis(50)) // Cut off early
+                                    Some(Duration::from_millis(30)) // Cut off early to prevent clicks
                                 } else {
                                     None // Play full duration
                                 };
