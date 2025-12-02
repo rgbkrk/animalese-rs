@@ -27,15 +27,16 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
-use rodio::{Decoder, OutputStream, Sink, Source};
-use std::fs::File;
-use std::io::BufReader;
+use kira::{
+    manager::{AudioManager, AudioManagerSettings, backend::DefaultBackend},
+    sound::static_sound::{StaticSoundData, StaticSoundHandle},
+    tween::Tween,
+    Volume,
+};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use rand::Rng;
-use std::sync::mpsc::{channel, Sender, Receiver};
-use std::thread;
 
 /// Returns the path to bundled voice assets
 ///
@@ -85,7 +86,7 @@ impl Default for VoiceProfile {
         Self {
             voice_type: VoiceType::F1,
             pitch_shift: 0.0,
-            pitch_variation: 0.2,
+            pitch_variation: 0.8,
             volume: 0.65,
             intonation: 0.0,
         }
@@ -154,19 +155,13 @@ fn semitones_to_rate(semitones: f32) -> f32 {
     2.0_f32.powf(semitones / 12.0)
 }
 
-/// Sound command for the playback queue
-enum SoundCommand {
-    Play { path: String, start: Duration, duration: Duration, apply_pitch: bool, max_duration: Option<Duration>, intonation_shift: f32 },
-    Stop,
-}
-
-/// Animalese sound engine with buffered playback
+/// Animalese sound engine with kira-based playback
 pub struct Animalese {
-    _stream: OutputStream,
+    manager: Arc<Mutex<AudioManager>>,
     voice_path: String,
     sfx_path: String,
     profile: Arc<Mutex<VoiceProfile>>,
-    command_tx: Sender<SoundCommand>,
+    active_sounds: Arc<Mutex<Vec<StaticSoundHandle>>>,
 }
 
 impl Animalese {
@@ -198,7 +193,6 @@ impl Animalese {
     /// let engine = Animalese::with_custom_assets("./my_assets/voice").unwrap();
     /// ```
     pub fn with_custom_assets(assets_path: impl Into<String>) -> Result<Self, Box<dyn std::error::Error>> {
-        let (_stream, stream_handle) = OutputStream::try_default()?;
         let voice_path = assets_path.into();
 
         // SFX file is in parent directory of voice
@@ -209,63 +203,18 @@ impl Animalese {
             .to_string_lossy()
             .to_string();
 
+        // Initialize kira audio manager
+        let manager = AudioManager::<DefaultBackend>::new(AudioManagerSettings::default())?;
+
         let profile = Arc::new(Mutex::new(VoiceProfile::default()));
-        let profile_clone = Arc::clone(&profile);
-
-        // Create playback queue channel
-        let (command_tx, command_rx): (Sender<SoundCommand>, Receiver<SoundCommand>) = channel();
-
-        // Spawn playback thread
-        thread::spawn(move || {
-            let sink = Sink::try_new(&stream_handle).expect("Failed to create sink");
-
-            loop {
-                match command_rx.recv() {
-                    Ok(SoundCommand::Play { path, start, duration, apply_pitch, max_duration, intonation_shift }) => {
-                        if let Ok(file) = File::open(&path) {
-                            if let Ok(source) = Decoder::new(BufReader::new(file)) {
-                                // Use shorter duration if specified (for fast typing)
-                                let actual_duration = max_duration.unwrap_or(duration);
-                                let source = source
-                                    .skip_duration(start)
-                                    .take_duration(actual_duration);
-
-                                if apply_pitch {
-                                    let profile = profile_clone.lock().unwrap();
-                                    let mut rng = rand::thread_rng();
-                                    let random_variation = rng.gen_range(-1.0..=1.0) * profile.pitch_variation;
-                                    let final_pitch = profile.pitch_shift + random_variation + intonation_shift;
-                                    let playback_rate = semitones_to_rate(final_pitch);
-                                    let volume = profile.volume;
-                                    drop(profile);
-
-                                    let source = source.speed(playback_rate).amplify(volume).fade_in(Duration::from_millis(5));
-                                    sink.append(source);
-                                } else {
-                                    let profile = profile_clone.lock().unwrap();
-                                    let volume = profile.volume;
-                                    drop(profile);
-
-                                    let source = source.amplify(volume).fade_in(Duration::from_millis(5));
-                                    sink.append(source);
-                                }
-                            }
-                        }
-                    }
-                    Ok(SoundCommand::Stop) => {
-                        sink.stop();
-                    }
-                    Err(_) => break, // Channel closed
-                }
-            }
-        });
+        let active_sounds = Arc::new(Mutex::new(Vec::new()));
 
         Ok(Self {
-            _stream,
+            manager: Arc::new(Mutex::new(manager)),
             voice_path,
             sfx_path,
             profile,
-            command_tx,
+            active_sounds,
         })
     }
 
@@ -454,7 +403,7 @@ impl Animalese {
         result
     }
 
-    /// Internal method to queue a sprite for playback
+    /// Internal method to play a sprite with kira
     fn play_sprite(&self, audio_path: &str, start: Duration, duration: Duration, apply_pitch: bool, max_duration: Option<Duration>, intonation_shift: f32) -> Result<(), Box<dyn std::error::Error>> {
         // Determine the full file path
         let file_path = if audio_path.ends_with(".ogg") {
@@ -469,22 +418,64 @@ impl Animalese {
                 .to_string()
         };
 
-        // Send play command to the queue
-        self.command_tx.send(SoundCommand::Play {
-            path: file_path,
-            start,
-            duration,
-            apply_pitch,
-            max_duration,
-            intonation_shift,
-        })?;
+        // Calculate parameters
+        let actual_duration = max_duration.unwrap_or(duration);
+
+        // Load sound data and slice to extract only the sprite region
+        let start_time = start.as_secs_f64();
+        let end_time = start_time + actual_duration.as_secs_f64();
+        let mut sound_data = StaticSoundData::from_file(&file_path)?
+            .slice(start_time..end_time);
+
+        if apply_pitch {
+            let profile = self.profile.lock().unwrap();
+            let mut rng = rand::thread_rng();
+            let random_variation = rng.gen_range(-1.0..=1.0) * profile.pitch_variation;
+            let final_pitch = profile.pitch_shift + random_variation + intonation_shift;
+            let playback_rate = semitones_to_rate(final_pitch);
+            let volume = profile.volume;
+
+            // Configure sound with pitch and volume
+            sound_data = sound_data
+                .playback_rate(playback_rate as f64)
+                .volume(Volume::Amplitude(volume as f64))
+                .fade_in_tween(Tween {
+                    duration: std::time::Duration::from_millis(5),
+                    ..Default::default()
+                });
+        } else {
+            let profile = self.profile.lock().unwrap();
+            let volume = profile.volume;
+
+            sound_data = sound_data
+                .volume(Volume::Amplitude(volume as f64))
+                .fade_in_tween(Tween {
+                    duration: std::time::Duration::from_millis(5),
+                    ..Default::default()
+                });
+        }
+
+        // Play the sound
+        let mut manager = self.manager.lock().unwrap();
+        let handle = manager.play(sound_data)?;
+
+        // Store handle to keep it alive
+        let mut active = self.active_sounds.lock().unwrap();
+        active.push(handle);
+
+        // Clean up finished sounds
+        active.retain(|h| h.state() != kira::sound::PlaybackState::Stopped);
 
         Ok(())
     }
 
-    /// Stop and clear the playback queue
+    /// Stop all currently playing sounds
     pub fn stop(&self) {
-        let _ = self.command_tx.send(SoundCommand::Stop);
+        let mut active = self.active_sounds.lock().unwrap();
+        for handle in active.iter_mut() {
+            let _ = handle.stop(Tween::default());
+        }
+        active.clear();
     }
 }
 
@@ -522,7 +513,7 @@ mod tests {
         let profile = VoiceProfile::default();
         assert_eq!(profile.voice_type, VoiceType::F1);
         assert_eq!(profile.pitch_shift, 0.0);
-        assert_eq!(profile.pitch_variation, 0.2);
+        assert_eq!(profile.pitch_variation, 0.8);
         assert_eq!(profile.volume, 0.65);
         assert_eq!(profile.intonation, 0.0);
     }

@@ -30,7 +30,7 @@ struct Args {
     pitch: f32,
 
     /// Random pitch variation (0.0 to 2.0)
-    #[arg(short = 'r', long, default_value = "0.2")]
+    #[arg(short = 'r', long, default_value = "0.8")]
     variation: f32,
 
     /// Volume (0.0 to 1.0)

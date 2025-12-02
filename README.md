@@ -42,7 +42,7 @@ let mut engine = Animalese::new()?;
 let profile = VoiceProfile {
     voice_type: VoiceType::M1,
     pitch_shift: -5.0,      // Lower pitch
-    pitch_variation: 0.3,   // More randomness
+    pitch_variation: 1.0,   // High variation for natural sound
     volume: 0.8,
     intonation: 0.0,        // No pitch glide
 };
@@ -50,6 +50,8 @@ let profile = VoiceProfile {
 engine.set_profile(profile);
 engine.speak("I'm Tom Nook")?;
 ```
+
+**Note on pitch variation:** Higher values (0.8-1.2) create more organic, natural-sounding speech by randomizing each letter's pitch. Lower values (0.0-0.3) sound more robotic and monotone. The default of 0.8 provides good variation without being distracting.
 
 ### Intonation and Speech Patterns
 
@@ -103,36 +105,23 @@ animalese --intonation=0.6 "What's that?"
 Available options:
 - `--voice` (`-v`): Voice type (f1-f4, m1-m4)
 - `--pitch` (`-p`): Pitch shift in semitones (-12.0 to 12.0)
-- `--variation` (`-r`): Random pitch variation (0.0 to 2.0)
+- `--variation` (`-r`): Random pitch variation (0.0 to 2.0, default: 0.8)
 - `--intonation` (`-i`): Pitch glide over sentence (-1.0 falling to 1.0 rising)
 - `--volume` (`-V`): Volume level (0.0 to 1.0)
 - `--list` (`-l`): Show available voices
 - `--test` (`-t`): Play test phrase
 
-## Known Issues
-
-### Audio Clicking in Fast Typing Mode
-
-When typing very fast in interactive mode, you may occasionally hear clicking or popping artifacts. This is due to abruptly cutting audio waveforms when sounds overlap rapidly.
-
-**Current mitigations:**
-- 5ms fade-in applied to all sounds
-- Reduced playback duration for fast typing (30ms)
-
-**Workaround:** Type slightly slower or adjust the fast-typing threshold in the source.
-
-**Future:** We're evaluating alternative audio backends like [`kira`](https://github.com/tesselode/kira) (designed for game audio with per-sound control and tweening) or [`creek`](https://github.com/MeadowlarkDAW/creek) that provide better control over individual sound instances and fade-outs.
-
 ## Technical Details
 
 ### Audio Backend
 
-Currently uses [`rodio`](https://github.com/RustAudio/rodio) for audio playback. While excellent for music playback, rodio's `Sink` architecture makes it challenging to apply per-sound fade-outs dynamically, which can cause clicks when cutting sounds short during fast typing.
+Uses [`kira`](https://github.com/tesselode/kira) for audio playback - a game audio library designed for real-time sound with individual instance control, tweening, and smooth fade-outs. This provides clean audio without clicks or pops, even during rapid-fire typing in interactive mode.
 
-**Potential alternatives:**
-- [`kira`](https://github.com/tesselode/kira) - Game audio library with individual sound instance control, tweening, and proper fade-outs
-- [`creek`](https://github.com/MeadowlarkDAW/creek) - Low-latency audio playback with sample-accurate control
-- [`tunes`](https://github.com/sqrew/tunes) - Comprehensive music synthesis and composition (heavier weight)
+**Why kira:**
+- Per-sound instance control with proper fade-in/fade-out
+- Low-latency playback suitable for interactive audio
+- Built-in tweening for smooth parameter changes
+- No audio artifacts when sounds overlap rapidly
 
 ## License
 
