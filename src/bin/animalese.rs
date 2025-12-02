@@ -1,9 +1,9 @@
 //! CLI tool for animalese text-to-speech
 //!
-//! Interactive mode: cargo run --example cli
-//! With text: cargo run --example cli -- "hello world"
-//! Piped: echo "hello" | cargo run --example cli
-//! With flags: cargo run --example cli -- --voice m1 --pitch=-5.0
+//! Interactive mode: animalese
+//! With text: animalese "hello world"
+//! Piped: echo "hello" | animalese
+//! With flags: animalese --voice m1 --pitch=-5.0
 
 use animalese::{Animalese, VoiceProfile, VoiceType};
 use clap::Parser;
@@ -37,9 +37,9 @@ struct Args {
     #[arg(short = 'V', long, default_value = "0.65")]
     volume: f32,
 
-    /// Path to audio assets directory
-    #[arg(short, long, default_value = "./assets/audio/voice")]
-    assets: String,
+    /// Path to audio assets directory (defaults to bundled assets)
+    #[arg(short, long)]
+    assets: Option<String>,
 
     /// List available voices and exit
     #[arg(short, long)]
@@ -71,9 +71,12 @@ fn list_voices() {
 }
 
 fn interactive_mode(engine: &Animalese, args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+    let assets_info = args.assets.as_ref()
+        .map(|s| s.as_str())
+        .unwrap_or("bundled");
     println!("🎮 Animalese Interactive Mode");
-    println!("   Voice: {}, Pitch: {}, Variation: {}",
-             args.voice, args.pitch, args.variation);
+    println!("   Voice: {}, Pitch: {}, Variation: {}, Assets: {}",
+             args.voice, args.pitch, args.variation, assets_info);
     println!("   Type to hear sounds. Press Esc or Ctrl-C to exit.\n");
 
     enable_raw_mode()?;
@@ -175,9 +178,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         volume: args.volume,
     };
 
-    // Initialize engine
-    let mut engine = Animalese::new(&args.assets)
-        .map_err(|e| format!("Failed to load audio files from '{}': {}", args.assets, e))?;
+    // Initialize engine with bundled assets or custom path
+    let mut engine = if let Some(custom_path) = &args.assets {
+        Animalese::with_custom_assets(custom_path)
+            .map_err(|e| format!("Failed to load audio files from '{}': {}", custom_path, e))?
+    } else {
+        Animalese::new()
+            .map_err(|e| format!("Failed to load audio files: {}", e))?
+    };
 
     engine.set_profile(profile);
 

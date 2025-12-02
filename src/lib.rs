@@ -6,12 +6,23 @@
 use rodio::{Decoder, OutputStream, Sink, Source};
 use std::fs::File;
 use std::io::BufReader;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use rand::Rng;
 use std::sync::mpsc::{channel, Sender, Receiver};
 use std::thread;
+
+/// Returns the path to bundled voice assets
+///
+/// Most users don't need this - just use `Animalese::new()`.
+/// Only useful if you need to know where the bundled assets are located.
+pub fn bundled_assets_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("assets")
+        .join("audio")
+        .join("voice")
+}
 
 /// Voice types available
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,11 +144,34 @@ pub struct Animalese {
 }
 
 impl Animalese {
-    /// Create a new Animalese engine with buffered playback
+    /// Create a new Animalese engine with bundled assets
+    ///
+    /// # Example
+    /// ```no_run
+    /// use animalese::Animalese;
+    ///
+    /// let engine = Animalese::new().unwrap();
+    /// engine.speak("hello world").unwrap();
+    /// ```
+    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        Self::with_custom_assets(bundled_assets_path().to_string_lossy().to_string())
+    }
+
+    /// Create an Animalese engine with custom audio assets
+    ///
+    /// Only use this if you have custom audio files that match the expected
+    /// format (sprite sheets with 200ms letter sounds, etc).
     ///
     /// # Arguments
-    /// * `assets_path` - Path to the assets/audio/voice directory
-    pub fn new(assets_path: impl Into<String>) -> Result<Self, Box<dyn std::error::Error>> {
+    /// * `assets_path` - Path to your custom assets/audio/voice directory
+    ///
+    /// # Example
+    /// ```no_run
+    /// use animalese::Animalese;
+    ///
+    /// let engine = Animalese::with_custom_assets("./my_assets/voice").unwrap();
+    /// ```
+    pub fn with_custom_assets(assets_path: impl Into<String>) -> Result<Self, Box<dyn std::error::Error>> {
         let (_stream, stream_handle) = OutputStream::try_default()?;
         let voice_path = assets_path.into();
 
