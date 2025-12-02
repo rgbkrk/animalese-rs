@@ -1,0 +1,19 @@
+[package]
+name = "animalese"
+version = "0.1.0"
+edition = "2024"
+authors = ["Kyle Kelley"]
+description = "Rust library for generating Animal Crossing-style animalese speech sounds"
+license = "MIT"
+keywords = ["audio", "animalese", "animal-crossing", "speech", "sound"]
+categories = ["multimedia::audio"]
+readme = "README.md"
+
+[dependencies]
+rodio = "0.17"
+rand = "0.8"
+
+[dev-dependencies]
+clap = { version = "4.5", features = ["derive"] }
+crossterm = "0.27"
+atty = "0.2"
